@@ -34,7 +34,7 @@ const markManualAttendanceValidation = [
   
   body('status')
     .optional()
-    .isIn(['present', 'absent', 'late', 'excused'])
+    .isIn(['present', 'absent', 'excused'])
     .withMessage('Invalid attendance status'),
   
   body('checkInTime')
@@ -51,8 +51,19 @@ const markManualAttendanceValidation = [
 const updateAttendanceValidation = [
   body('status')
     .optional()
-    .isIn(['present', 'absent', 'late', 'excused'])
+    .isIn(['present', 'absent', 'excused'])
     .withMessage('Invalid attendance status'),
+  
+  body('notes')
+    .optional()
+    .isLength({ max: 500 })
+    .withMessage('Notes cannot exceed 500 characters')
+];
+
+const approveAttendanceValidation = [
+  body('status')
+    .isIn(['present', 'absent', 'excused'])
+    .withMessage('Valid attendance status is required'),
   
   body('notes')
     .optional()
@@ -90,17 +101,23 @@ const getAttendanceValidation = [
   
   query('status')
     .optional()
-    .isIn(['present', 'absent', 'late', 'excused'])
+    .isIn(['present', 'absent', 'excused'])
     .withMessage('Invalid status filter')
 ];
 
 // Routes
-router.post('/mark-qr', authenticateToken, markAttendanceValidation, attendanceController.markAttendanceByQR);
+router.post('/submit-qr', authenticateToken, markAttendanceValidation, attendanceController.submitAttendanceByQR);
 router.post('/mark-manual', authenticateToken, markManualAttendanceValidation, attendanceController.markAttendanceManually);
 router.get('/', authenticateToken, requireAttendanceAccess, getAttendanceValidation, attendanceController.getAttendanceRecords);
 router.get('/stats', authenticateToken, requireAttendanceAccess, attendanceController.getAttendanceStats);
 router.put('/:attendanceId', authenticateToken, updateAttendanceValidation, attendanceController.updateAttendance);
 router.delete('/:attendanceId', authenticateToken, attendanceController.deleteAttendance);
 router.post('/:attendanceId/checkout', authenticateToken, markCheckoutValidation, attendanceController.markCheckout);
+
+// New approval workflow routes
+router.get('/pending/:sessionId', authenticateToken, attendanceController.getPendingAttendance);
+router.post('/:attendanceId/approve', authenticateToken, approveAttendanceValidation, attendanceController.approveAttendance);
+router.post('/bulk-approve/:sessionId', authenticateToken, attendanceController.bulkApproveAllPresent);
+router.put('/:attendanceId/modify', authenticateToken, updateAttendanceValidation, attendanceController.modifyAttendance);
 
 module.exports = router;

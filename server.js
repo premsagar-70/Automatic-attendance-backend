@@ -19,6 +19,7 @@ const userRoutes = require('./routes/userRoutes');
 const attendanceRoutes = require('./routes/attendanceRoutes');
 const sessionRoutes = require('./routes/sessionRoutes');
 const reportRoutes = require('./routes/reportRoutes');
+const timetableRoutes = require('./routes/timetableRoutes');
 
 const app = express();
 
@@ -44,6 +45,7 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'https://sih.premsagar.qzz.io'
 ].filter(Boolean)
 
 app.use(cors({
@@ -77,6 +79,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/timetables', timetableRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

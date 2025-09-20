@@ -9,9 +9,9 @@ const dateUtils = require('../utils/dateUtils');
 
 class AttendanceController {
   /**
-   * Mark attendance using QR code
+   * Submit attendance using QR code (pending approval)
    */
-  async markAttendanceByQR(req, res) {
+  async submitAttendanceByQR(req, res) {
     try {
       // Check for validation errors
       const errors = validationResult(req);
@@ -93,33 +93,38 @@ class AttendanceController {
       const now = new Date();
       const sessionStart = new Date(session.startTime);
       const sessionEnd = new Date(session.endTime);
-      const lateEntryCutoff = new Date(sessionStart.getTime() + (session.attendanceSettings.lateEntryCutoff || 15) * 60 * 1000);
 
-      let status = 'present';
-      if (now > lateEntryCutoff) {
-        status = 'late';
+      // Check if session is currently active
+      if (now < sessionStart || now > sessionEnd) {
+        return res.status(400).json({
+          success: false,
+          message: 'Session is not currently active'
+        });
       }
 
-      // Create attendance record
+      // Create attendance record with pending approval
       const attendanceData = {
         student: studentId,
         session: session._id,
-        status,
+        status: 'present', // Default to present, faculty can change
         checkInTime: now,
+        academicYear: session.academicYear,
+        semester: session.semester,
         location: location || {},
         deviceInfo: deviceInfo || {},
         qrCodeData: {
           code: payload.checksum,
           scannedAt: now,
           isValid: true
-        }
+        },
+        qrSubmission: {
+          submittedAt: now,
+          isPendingApproval: true
+        },
+        isApproved: false
       };
 
       const attendance = await Attendance.create(attendanceData);
-
-      // Update session attendance count
-      session.currentAttendance += 1;
-      await session.save();
 
       // Record QR code scan
       const qrCodeLog = await QRCodeLog.findOne({ 'payload.sessionId': session._id });
@@ -129,11 +134,11 @@ class AttendanceController {
 
       res.status(201).json({
         success: true,
-        message: 'Attendance marked successfully',
+        message: 'Attendance submitted successfully. Waiting for faculty approval.',
         data: {
           attendance,
-          status,
-          checkInTime: now
+          status: 'pending_approval',
+          submittedAt: now
         }
       });
     } catch (error) {
@@ -547,6 +552,266 @@ class AttendanceController {
       res.status(500).json({
         success: false,
         message: 'Failed to mark checkout',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get pending attendance submissions for faculty approval
+   */
+  async getPendingAttendance(req, res) {
+    try {
+      const { sessionId } = req.params;
+      const facultyId = req.user._id;
+
+      // Verify faculty has access to this session
+      const session = await Session.findById(sessionId);
+      if (!session || session.faculty.toString() !== facultyId.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied to this session'
+        });
+      }
+
+      const pendingAttendance = await Attendance.find({
+        session: sessionId,
+        'qrSubmission.isPendingApproval': true,
+        isApproved: false
+      })
+      .populate('student', 'firstName lastName studentId email')
+      .sort({ 'qrSubmission.submittedAt': 1 });
+
+      res.json({
+        success: true,
+        data: {
+          pendingAttendance,
+          count: pendingAttendance.length
+        }
+      });
+    } catch (error) {
+      console.error('Get pending attendance error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get pending attendance',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Approve individual attendance submission
+   */
+  async approveAttendance(req, res) {
+    try {
+      const { attendanceId } = req.params;
+      const { status, notes } = req.body;
+      const facultyId = req.user._id;
+
+      // Validate status
+      if (!['present', 'absent', 'excused'].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid status. Must be present, absent, or excused'
+        });
+      }
+
+      const attendance = await Attendance.findById(attendanceId)
+        .populate('session', 'faculty title');
+
+      if (!attendance) {
+        return res.status(404).json({
+          success: false,
+          message: 'Attendance record not found'
+        });
+      }
+
+      // Verify faculty has access to this session
+      if (attendance.session.faculty.toString() !== facultyId.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied to this attendance record'
+        });
+      }
+
+      // Update attendance
+      attendance.status = status;
+      attendance.isApproved = true;
+      attendance.approvedBy = facultyId;
+      attendance.approvedAt = new Date();
+      attendance.qrSubmission.isPendingApproval = false;
+      if (notes) {
+        attendance.verificationNotes = notes;
+      }
+
+      await attendance.save();
+
+      res.json({
+        success: true,
+        message: 'Attendance approved successfully',
+        data: { attendance }
+      });
+    } catch (error) {
+      console.error('Approve attendance error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to approve attendance',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Bulk approve all students as present
+   */
+  async bulkApproveAllPresent(req, res) {
+    try {
+      const { sessionId } = req.params;
+      const facultyId = req.user._id;
+
+      // Verify faculty has access to this session
+      const session = await Session.findById(sessionId);
+      if (!session || session.faculty.toString() !== facultyId.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied to this session'
+        });
+      }
+
+      // Get all enrolled students
+      const enrolledStudentIds = session.enrolledStudents.map(es => es.student);
+
+      // Get existing attendance records
+      const existingAttendance = await Attendance.find({
+        session: sessionId,
+        student: { $in: enrolledStudentIds }
+      });
+
+      const existingStudentIds = existingAttendance.map(a => a.student.toString());
+
+      // Create attendance records for students who haven't submitted
+      const newAttendanceRecords = [];
+      for (const studentId of enrolledStudentIds) {
+        if (!existingStudentIds.includes(studentId.toString())) {
+          newAttendanceRecords.push({
+            student: studentId,
+            session: sessionId,
+            status: 'present',
+            checkInTime: new Date(),
+            academicYear: session.academicYear,
+            semester: session.semester,
+            isApproved: true,
+            approvedBy: facultyId,
+            approvedAt: new Date(),
+            qrSubmission: {
+              submittedAt: new Date(),
+              isPendingApproval: false
+            }
+          });
+        }
+      }
+
+      // Update existing pending records to approved
+      await Attendance.updateMany(
+        {
+          session: sessionId,
+          'qrSubmission.isPendingApproval': true,
+          isApproved: false
+        },
+        {
+          $set: {
+            status: 'present',
+            isApproved: true,
+            approvedBy: facultyId,
+            approvedAt: new Date(),
+            'qrSubmission.isPendingApproval': false
+          }
+        }
+      );
+
+      // Create new attendance records
+      if (newAttendanceRecords.length > 0) {
+        await Attendance.insertMany(newAttendanceRecords);
+      }
+
+      // Update session attendance count
+      session.currentAttendance = enrolledStudentIds.length;
+      await session.save();
+
+      res.json({
+        success: true,
+        message: 'All students approved as present successfully',
+        data: {
+          totalStudents: enrolledStudentIds.length,
+          newRecords: newAttendanceRecords.length,
+          updatedRecords: existingAttendance.length
+        }
+      });
+    } catch (error) {
+      console.error('Bulk approve error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to bulk approve attendance',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Modify attendance record
+   */
+  async modifyAttendance(req, res) {
+    try {
+      const { attendanceId } = req.params;
+      const { status, notes } = req.body;
+      const facultyId = req.user._id;
+
+      // Validate status
+      if (!['present', 'absent', 'excused'].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid status. Must be present, absent, or excused'
+        });
+      }
+
+      const attendance = await Attendance.findById(attendanceId)
+        .populate('session', 'faculty title');
+
+      if (!attendance) {
+        return res.status(404).json({
+          success: false,
+          message: 'Attendance record not found'
+        });
+      }
+
+      // Verify faculty has access to this session
+      if (attendance.session.faculty.toString() !== facultyId.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied to this attendance record'
+        });
+      }
+
+      // Update attendance
+      attendance.status = status;
+      attendance.verifiedBy = facultyId;
+      attendance.verifiedAt = new Date();
+      if (notes) {
+        attendance.verificationNotes = notes;
+      }
+
+      await attendance.save();
+
+      res.json({
+        success: true,
+        message: 'Attendance modified successfully',
+        data: { attendance }
+      });
+    } catch (error) {
+      console.error('Modify attendance error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to modify attendance',
         error: error.message
       });
     }

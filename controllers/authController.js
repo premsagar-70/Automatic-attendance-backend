@@ -442,11 +442,13 @@ class AuthController {
         const rawToken = user.generatePasswordReset(15); // 15 minutes expiry
         await user.save();
 
+        const CLIENT_URL = process.env.NODE_ENV === 'production' ? process.env.CLIENT_URL_PROD : process.env.CLIENT_URL_DEV;
+
         // Send password reset email
         const emailResult = await emailService.sendPasswordResetEmail(
           email, 
           rawToken, 
-          process.env.CLIENT_URL + '/auth/reset-password'
+          CLIENT_URL + '/auth/reset-password'
         );
 
         if (emailResult.success) {
