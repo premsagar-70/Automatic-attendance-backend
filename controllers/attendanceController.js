@@ -9,15 +9,9 @@ const dateUtils = require('../utils/dateUtils');
 
 class AttendanceController {
   /**
-<<<<<<< HEAD
    * Submit attendance using QR code (pending approval)
    */
   async submitAttendanceByQR(req, res) {
-=======
-   * Mark attendance using QR code
-   */
-  async markAttendanceByQR(req, res) {
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
     try {
       // Check for validation errors
       const errors = validationResult(req);
@@ -99,7 +93,6 @@ class AttendanceController {
       const now = new Date();
       const sessionStart = new Date(session.startTime);
       const sessionEnd = new Date(session.endTime);
-<<<<<<< HEAD
 
       // Check if session is currently active
       if (now < sessionStart || now > sessionEnd) {
@@ -117,48 +110,22 @@ class AttendanceController {
         checkInTime: now,
         academicYear: session.academicYear,
         semester: session.semester,
-=======
-      const lateEntryCutoff = new Date(sessionStart.getTime() + (session.attendanceSettings.lateEntryCutoff || 15) * 60 * 1000);
-
-      let status = 'present';
-      if (now > lateEntryCutoff) {
-        status = 'late';
-      }
-
-      // Create attendance record
-      const attendanceData = {
-        student: studentId,
-        session: session._id,
-        status,
-        checkInTime: now,
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
         location: location || {},
         deviceInfo: deviceInfo || {},
         qrCodeData: {
           code: payload.checksum,
           scannedAt: now,
           isValid: true
-<<<<<<< HEAD
         },
         qrSubmission: {
           submittedAt: now,
           isPendingApproval: true
         },
         isApproved: false
-=======
-        }
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
       };
 
       const attendance = await Attendance.create(attendanceData);
 
-<<<<<<< HEAD
-=======
-      // Update session attendance count
-      session.currentAttendance += 1;
-      await session.save();
-
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
       // Record QR code scan
       const qrCodeLog = await QRCodeLog.findOne({ 'payload.sessionId': session._id });
       if (qrCodeLog) {
@@ -167,19 +134,11 @@ class AttendanceController {
 
       res.status(201).json({
         success: true,
-<<<<<<< HEAD
         message: 'Attendance submitted successfully. Waiting for faculty approval.',
         data: {
           attendance,
           status: 'pending_approval',
           submittedAt: now
-=======
-        message: 'Attendance marked successfully',
-        data: {
-          attendance,
-          status,
-          checkInTime: now
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
         }
       });
     } catch (error) {
@@ -597,7 +556,6 @@ class AttendanceController {
       });
     }
   }
-<<<<<<< HEAD
 
   /**
    * Get pending attendance submissions for faculty approval
@@ -858,8 +816,6 @@ class AttendanceController {
       });
     }
   }
-=======
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
 }
 
 module.exports = new AttendanceController();
