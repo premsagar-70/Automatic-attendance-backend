@@ -34,11 +34,7 @@ const markManualAttendanceValidation = [
   
   body('status')
     .optional()
-<<<<<<< HEAD
     .isIn(['present', 'absent', 'excused'])
-=======
-    .isIn(['present', 'absent', 'late', 'excused'])
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
     .withMessage('Invalid attendance status'),
   
   body('checkInTime')
@@ -55,11 +51,7 @@ const markManualAttendanceValidation = [
 const updateAttendanceValidation = [
   body('status')
     .optional()
-<<<<<<< HEAD
     .isIn(['present', 'absent', 'excused'])
-=======
-    .isIn(['present', 'absent', 'late', 'excused'])
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
     .withMessage('Invalid attendance status'),
   
   body('notes')
@@ -68,7 +60,6 @@ const updateAttendanceValidation = [
     .withMessage('Notes cannot exceed 500 characters')
 ];
 
-<<<<<<< HEAD
 const approveAttendanceValidation = [
   body('status')
     .isIn(['present', 'absent', 'excused'])
@@ -80,8 +71,6 @@ const approveAttendanceValidation = [
     .withMessage('Notes cannot exceed 500 characters')
 ];
 
-=======
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
 const markCheckoutValidation = [
   body('checkOutTime')
     .optional()
@@ -112,20 +101,12 @@ const getAttendanceValidation = [
   
   query('status')
     .optional()
-<<<<<<< HEAD
     .isIn(['present', 'absent', 'excused'])
-=======
-    .isIn(['present', 'absent', 'late', 'excused'])
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
     .withMessage('Invalid status filter')
 ];
 
 // Routes
-<<<<<<< HEAD
 router.post('/submit-qr', authenticateToken, markAttendanceValidation, attendanceController.submitAttendanceByQR);
-=======
-router.post('/mark-qr', authenticateToken, markAttendanceValidation, attendanceController.markAttendanceByQR);
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
 router.post('/mark-manual', authenticateToken, markManualAttendanceValidation, attendanceController.markAttendanceManually);
 router.get('/', authenticateToken, requireAttendanceAccess, getAttendanceValidation, attendanceController.getAttendanceRecords);
 router.get('/stats', authenticateToken, requireAttendanceAccess, attendanceController.getAttendanceStats);
@@ -133,13 +114,10 @@ router.put('/:attendanceId', authenticateToken, updateAttendanceValidation, atte
 router.delete('/:attendanceId', authenticateToken, attendanceController.deleteAttendance);
 router.post('/:attendanceId/checkout', authenticateToken, markCheckoutValidation, attendanceController.markCheckout);
 
-<<<<<<< HEAD
 // New approval workflow routes
 router.get('/pending/:sessionId', authenticateToken, attendanceController.getPendingAttendance);
 router.post('/:attendanceId/approve', authenticateToken, approveAttendanceValidation, attendanceController.approveAttendance);
 router.post('/bulk-approve/:sessionId', authenticateToken, attendanceController.bulkApproveAllPresent);
 router.put('/:attendanceId/modify', authenticateToken, updateAttendanceValidation, attendanceController.modifyAttendance);
 
-=======
->>>>>>> 27add0b86d08a4b3721bc69cfd374341a1c8389d
 module.exports = router;
