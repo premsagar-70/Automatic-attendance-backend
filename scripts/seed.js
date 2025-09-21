@@ -1,168 +1,179 @@
-/* eslint-disable no-console */
-const path = require('path')
-const fs = require('fs')
-const bcrypt = require('bcryptjs')
-const mongoose = require('mongoose')
-require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') })
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+const fs = require('fs');
+const path = require('path');
 
-const connectDB = require('../config/db')
-const User = require('../models/User')
-const Session = require('../models/Session')
-const Attendance = require('../models/Attendance')
-const QRCodeLog = require('../models/QRCodeLog')
+// Import models
+const User = require('../models/User');
+const Department = require('../models/Department');
+const Session = require('../models/Session');
+const Attendance = require('../models/Attendance');
+const Timetable = require('../models/Timetable');
+const AcademicYear = require('../models/AcademicYear');
+const QRCodeLog = require('../models/QRCodeLog');
 
-async function loadJSON() {
-  const dataPath = path.resolve(__dirname, '..', '..', 'database', 'sample-data.json')
-  const raw = fs.readFileSync(dataPath, 'utf-8')
-  return JSON.parse(raw)
-}
+// Load sample data
+const sampleDataPath = path.join(__dirname, '../database/sample-data.json');
+const sampleData = JSON.parse(fs.readFileSync(sampleDataPath, 'utf8'));
 
-async function seed() {
-  await connectDB()
-
+const seedDatabase = async () => {
   try {
-    const data = await loadJSON()
+    console.log('�� Starting database seeding...');
 
-    // Clear existing collections
-    await Attendance.deleteMany({})
-    await QRCodeLog.deleteMany({})
-    await Session.deleteMany({})
-    await User.deleteMany({})
+    // Clear existing data
+    await User.deleteMany({});
+    await Department.deleteMany({});
+    await Session.deleteMany({});
+    await Attendance.deleteMany({});
+    await Timetable.deleteMany({});
+    await AcademicYear.deleteMany({});
+    await QRCodeLog.deleteMany({});
 
-    // Insert users with hashed passwords
-    const userIdByExternal = new Map() // studentId/employeeId/email -> _id
-    const usersToInsert = []
+    console.log('🗑️  Cleared existing data');
 
-    for (const u of data.users) {
-      const passwordHash = await bcrypt.hash(u.password || 'password123', 10)
-      const userDoc = {
-        firstName: u.firstName,
-        lastName: u.lastName,
-        email: u.email,
-        password: passwordHash,
-        role: u.role,
-        studentId: u.studentId || undefined,
-        employeeId: u.employeeId || undefined,
-        designation: u.designation || undefined,
-        subjects: u.subjects || [],
-        department: u.department || undefined,
-        semester: u.semester || undefined,
-        batch: u.batch || undefined,
-        phone: u.phone || undefined,
-        isActive: u.isActive !== false,
+    // Seed departments first
+    console.log('🏢 Seeding departments...');
+    const departments = [];
+    for (const deptData of sampleData.departments) {
+      const department = new Department(deptData);
+      await department.save();
+      departments.push(department);
+      console.log(`✅ Created department: ${department.name}`);
+    }
+
+    // Create department mapping for users
+    const departmentMap = {};
+    departments.forEach(dept => {
+      departmentMap[dept.code] = dept._id;
+    });
+
+    // Seed users
+    console.log('👥 Seeding users...');
+    const users = [];
+    for (const userData of sampleData.users) {
+      // Hash password
+      const hashedPassword = await bcrypt.hash(userData.password, 12);
+      
+      // Map department string to ObjectId
+      const departmentId = departmentMap[userData.department];
+      
+      const user = new User({
+        ...userData,
+        password: hashedPassword,
+        department: departmentId
+      });
+      
+      await user.save();
+      users.push(user);
+      console.log(`✅ Created user: ${user.firstName} ${user.lastName} (${user.role})`);
+    }
+
+    // Create user mapping for sessions
+    const userMap = {};
+    users.forEach(user => {
+      if (user.role === 'faculty') {
+        userMap[user.email] = user._id;
+      } else if (user.role === 'student') {
+        userMap[user.studentId] = user._id;
       }
-      usersToInsert.push(userDoc)
+    });
+
+    // Seed academic years
+    console.log('�� Seeding academic years...');
+    for (const academicYearData of sampleData.academicYears) {
+      const academicYear = new AcademicYear(academicYearData);
+      await academicYear.save();
+      console.log(`✅ Created academic year: ${academicYear.year}`);
     }
 
-    const insertedUsers = await User.insertMany(usersToInsert)
-    const defaultFaculty = insertedUsers.find((u) => u.role === 'faculty')
-
-    // Build lookup maps
-    for (const u of insertedUsers) {
-      if (u.studentId) userIdByExternal.set(u.studentId, u._id)
-      if (u.employeeId) userIdByExternal.set(u.employeeId, u._id)
-      userIdByExternal.set(u.email, u._id)
+    // Seed sessions
+    console.log('📚 Seeding sessions...');
+    const sessions = [];
+    for (const sessionData of sampleData.sessions) {
+      const session = new Session({
+        ...sessionData,
+        faculty: userMap[sessionData.facultyEmail]
+      });
+      await session.save();
+      sessions.push(session);
+      console.log(`✅ Created session: ${session.title}`);
     }
 
-    // Insert sessions
-    const sessionsToInsert = []
-    for (const s of data.sessions) {
-      let facultyId = s.facultyEmail ? userIdByExternal.get(s.facultyEmail) : undefined
-      if (!facultyId && defaultFaculty) facultyId = defaultFaculty._id
-      const enrolled = (s.enrolledStudents || []).map((sid) => ({
-        student: userIdByExternal.get(sid),
-        enrolledAt: new Date(),
-      })).filter(Boolean)
+    // Create session mapping for attendance
+    const sessionMap = {};
+    sessions.forEach((session, index) => {
+      sessionMap[`session${index + 1}`] = session._id;
+    });
 
-      sessionsToInsert.push({
-        title: s.title,
-        description: s.description,
-        subject: s.subject,
-        courseCode: s.courseCode,
-        faculty: facultyId,
-        startTime: new Date(s.startTime),
-        endTime: new Date(s.endTime),
-        location: s.location,
-        roomNumber: s.roomNumber,
-        building: s.building,
-        sessionType: s.sessionType,
-        mode: s.mode,
-        maxCapacity: s.maxCapacity,
-        status: s.status || 'scheduled',
-        enrolledStudents: enrolled,
-        attendanceSettings: s.attendanceSettings || {},
-      })
+    // Seed attendance
+    console.log('📊 Seeding attendance...');
+    for (const attendanceData of sampleData.attendance) {
+      const attendance = new Attendance({
+        ...attendanceData,
+        student: userMap[attendanceData.studentId],
+        session: sessionMap[attendanceData.sessionId],
+        approvedBy: userMap[attendanceData.approvedBy]
+      });
+      await attendance.save();
+      console.log(`✅ Created attendance record for student: ${attendanceData.studentId}`);
     }
 
-    const insertedSessions = await Session.insertMany(sessionsToInsert)
-
-    // Map for fake session ids from sample data (session1/session2) if present
-    const sessionByIndex = new Map()
-    insertedSessions.forEach((sess, idx) => {
-      sessionByIndex.set(`session${idx + 1}`, sess._id)
-    })
-
-    // Insert attendance
-    const attendanceToInsert = []
-    for (const a of data.attendance) {
-      const student = userIdByExternal.get(a.studentId)
-      const sessionId = sessionByIndex.get(a.sessionId) || a.sessionId
-      const rec = {
-        student,
-        session: sessionId,
-        status: a.status,
-        checkInTime: a.checkInTime ? new Date(a.checkInTime) : new Date(),
-        checkOutTime: a.checkOutTime ? new Date(a.checkOutTime) : undefined,
-        location: a.location || undefined,
-        deviceInfo: a.deviceInfo || undefined,
-        qrCodeData: a.qrCodeData || undefined,
-        verifiedBy: a.verifiedBy ? userIdByExternal.get(a.verifiedBy) : undefined,
-        verifiedAt: a.verifiedAt ? new Date(a.verifiedAt) : undefined,
-        verificationNotes: a.verificationNotes || undefined,
-
-        semester: String(a.semester || '1'),
-        academicYear: a.academicYear || '2025-2026',
-      }
-      attendanceToInsert.push(rec)
-    }
-    if (attendanceToInsert.length) {
-      await Attendance.insertMany(attendanceToInsert)
+    // Seed timetables
+    console.log('📋 Seeding timetables...');
+    for (const timetableData of sampleData.timetables) {
+      const timetable = new Timetable(timetableData);
+      await timetable.save();
+      console.log(`✅ Created timetable: ${timetable.title}`);
     }
 
-    // Insert QR code logs
-    const qrLogsToInsert = []
-    for (const q of data.qrCodeLogs || []) {
-      qrLogsToInsert.push({
-        code: q.code,
-        session: sessionByIndex.get(q.sessionId) || q.sessionId,
-        generatedBy: q.generatedBy ? userIdByExternal.get(q.generatedBy) : undefined,
-        generatedAt: q.generatedAt ? new Date(q.generatedAt) : new Date(),
-        settings: q.settings || {},
-        usage: q.usage || {},
-        scans: (q.scans || []).map((scan) => ({
-          scannedBy: scan.scannedBy ? userIdByExternal.get(scan.scannedBy) : undefined,
-          scannedAt: scan.scannedAt ? new Date(scan.scannedAt) : new Date(),
-          deviceInfo: scan.deviceInfo || undefined,
-          location: scan.location || undefined,
-          isValid: scan.isValid !== false,
-          reason: scan.reason || undefined,
-        })),
-        status: q.status || 'active',
-        isActive: q.isActive !== false,
-      })
+    // Seed QR code logs
+    console.log('📱 Seeding QR code logs...');
+    for (const qrLogData of sampleData.qrCodeLogs) {
+      const qrLog = new QRCodeLog(qrLogData);
+      await qrLog.save();
+      console.log(`✅ Created QR code log`);
     }
-    if (qrLogsToInsert.length) {
-      await QRCodeLog.insertMany(qrLogsToInsert)
-    }
-    console.log('✅ Database seeded successfully')
-  } catch (err) {
-    console.error('❌ Seeding failed:', err)
-    process.exitCode = 1
-  } finally {
-    await mongoose.connection.close()
+
+    console.log('🎉 Database seeding completed successfully!');
+    console.log('\n📊 Summary:');
+    console.log(`- Departments: ${departments.length}`);
+    console.log(`- Users: ${users.length}`);
+    console.log(`- Sessions: ${sessions.length}`);
+    console.log(`- Attendance Records: ${sampleData.attendance.length}`);
+    console.log(`- Timetables: ${sampleData.timetables.length}`);
+    console.log(`- Academic Years: ${sampleData.academicYears.length}`);
+    console.log(`- QR Code Logs: ${sampleData.qrCodeLogs.length}`);
+
+    console.log('\n🔑 Test Credentials:');
+    console.log('Admin: admin@sreerama.ac.in / Admin@1234');
+    console.log('Faculty: temp-teacher@sreerama.ac.in / sreerama');
+    console.log('Student: premsagar10000000@gmail.com / sreerama');
+
+  } catch (error) {
+    console.error('❌ Error seeding database:', error);
+    throw error;
   }
+};
+
+// Run seeding if called directly
+if (require.main === module) {
+  // Connect to MongoDB
+  mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-attendance-system', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    console.log('🔗 Connected to MongoDB');
+    return seedDatabase();
+  })
+  .then(() => {
+    console.log('✅ Seeding completed');
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error('❌ Seeding failed:', error);
+    process.exit(1);
+  });
 }
 
-seed()
-
-
+module.exports = seedDatabase;
