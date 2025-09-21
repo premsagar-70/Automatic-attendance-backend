@@ -91,9 +91,8 @@ router.post('/',
   departmentController.createDepartment
 );
 
-router.get('/', 
-  authenticateToken,
-  requireFacultyOrAdmin,
+// Public: allow fetching departments list without authentication so registration and public pages can read it
+router.get('/',
   departmentController.getDepartments
 );
 
