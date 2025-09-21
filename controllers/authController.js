@@ -28,6 +28,7 @@ class AuthController {
         studentId,
         employeeId,
         department,
+        academicYear,
         semester,
         batch,
         designation,
@@ -63,6 +64,14 @@ class AuthController {
 
       // Add role-specific fields
       if (role === 'student') {
+        // Validate student-specific required fields
+        if (!studentId || !department || !academicYear || !semester || !batch) {
+          return res.status(400).json({
+            success: false,
+            message: 'Missing required student fields: studentId, department, academicYear, semester, batch'
+          });
+        }
+
         userData.studentId = studentId;
         userData.department = department;
         userData.academicYear = academicYear;

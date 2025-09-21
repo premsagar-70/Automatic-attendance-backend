@@ -212,21 +212,23 @@ const seedDatabase = async () => {
 
 // Run seeding if called directly
 if (require.main === module) {
-  // Connect to MongoDB
-  mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://premsagar10000000_db_user:0RyV170nxOlXx3wj@cluster0.dqzrkou.mongodb.net/smart-attendance', {
+  // Connect to MongoDB using environment variable or default local URL
+  const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-attendance';
+
+  mongoose.connect(mongoUri, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
   .then(() => {
-    console.log('🔗 Connected to MongoDB');
+    console.log(`\ud83d\udd17 Connected to MongoDB at ${mongoUri}`);
     return seedDatabase();
   })
   .then(() => {
-    console.log('✅ Seeding completed');
+    console.log('\u2705 Seeding completed');
     process.exit(0);
   })
   .catch((error) => {
-    console.error('❌ Seeding failed:', error);
+    console.error('\u274c Seeding failed:', error);
     process.exit(1);
   });
 }
