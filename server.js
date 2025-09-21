@@ -26,6 +26,9 @@ const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
+// Trust first proxy (Render, Heroku, etc.)
+app.set('trust proxy', 1);
+
 // Connect to MongoDB
 connectDB();
 
