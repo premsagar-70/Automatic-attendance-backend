@@ -290,6 +290,42 @@ class EmailService {
       </html>
     `;
     }
+
+    /**
+     * Send test email
+     */
+    async sendTestEmail(email) {
+        try {
+            while (!this.isInitialized) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            const mailOptions = {
+                from: this.fromEmail,
+                to: email,
+                subject: 'Test Email - Smart Attendance System',
+                html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #4F46E5;">Test Email Successful! 🎉</h2>
+                    <p>This is a test email from the Smart Attendance System.</p>
+                    <p>If you received this email, your email configuration is working correctly.</p>
+                    <p><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
+                </div>
+                `
+            };
+
+            const result = await this.transporter.sendMail(mailOptions);
+            
+            if (process.env.NODE_ENV === 'development') {
+                console.log('Test email preview URL:', result.previewUrl);
+            }
+
+            return result;
+        } catch (error) {
+            console.error('Test email sending failed:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = new EmailService();

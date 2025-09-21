@@ -65,12 +65,17 @@ class AuthController {
       if (role === 'student') {
         userData.studentId = studentId;
         userData.department = department;
+        userData.academicYear = academicYear;
         userData.semester = semester;
         userData.batch = batch;
+        userData.approvalStatus = 'pending'; // Students need approval
       } else if (role === 'faculty') {
         userData.employeeId = employeeId;
         userData.designation = designation;
         userData.subjects = subjects || [];
+        userData.approvalStatus = 'approved'; // Faculty auto-approved
+      } else if (role === 'admin') {
+        userData.approvalStatus = 'approved'; // Admin auto-approved
       }
 
       // Create user
@@ -93,9 +98,13 @@ class AuthController {
       const userResponse = user.toObject();
       delete userResponse.password;
 
+      const message = role === 'student' 
+        ? 'Registration successful! Your account is pending approval from the admin.'
+        : 'User registered successfully';
+
       res.status(201).json({
         success: true,
-        message: 'User registered successfully',
+        message,
         data: {
           user: userResponse,
           token,

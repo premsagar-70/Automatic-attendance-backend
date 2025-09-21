@@ -34,6 +34,20 @@ const sessionSchema = new mongoose.Schema({
     required: [true, 'Faculty reference is required']
   },
 
+  // Academic year and semester
+  academicYear: {
+    type: String,
+    required: [true, 'Academic year is required'],
+    trim: true,
+    enum: ['1', '2', '3', '4']
+  },
+  semester: {
+    type: String,
+    required: [true, 'Semester is required'],
+    trim: true,
+    enum: ['1', '2']
+  },
+
   // Session timing
   startTime: {
     type: Date,

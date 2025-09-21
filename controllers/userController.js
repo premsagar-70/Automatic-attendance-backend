@@ -493,6 +493,189 @@ class UserController {
       });
     }
   }
+
+  /**
+   * Get pending approvals
+   */
+  async getPendingApprovals(req, res) {
+    try {
+      const {
+        page = 1,
+        limit = 10,
+        role,
+        department
+      } = req.query;
+
+      const query = {
+        approvalStatus: 'pending',
+        isActive: true
+      };
+
+      if (role) query.role = role;
+      if (department) query.department = department;
+
+      const pendingUsers = await User.find(query)
+        .populate('department', 'name code')
+        .sort({ createdAt: -1 })
+        .limit(limit * 1)
+        .skip((page - 1) * limit);
+
+      const totalPending = await User.countDocuments(query);
+
+      res.json({
+        success: true,
+        data: {
+          pendingUsers,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(totalPending / limit),
+            totalPending,
+            hasNext: page < Math.ceil(totalPending / limit),
+            hasPrev: page > 1
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Get pending approvals error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get pending approvals',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Approve user
+   */
+  async approveUser(req, res) {
+    try {
+      const { userId } = req.params;
+      const approvedBy = req.user._id;
+
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      if (user.approvalStatus !== 'pending') {
+        return res.status(400).json({
+          success: false,
+          message: 'User is not pending approval'
+        });
+      }
+
+      user.approvalStatus = 'approved';
+      user.approvedBy = approvedBy;
+      user.approvedAt = new Date();
+      await user.save();
+
+      res.json({
+        success: true,
+        message: 'User approved successfully',
+        data: { user }
+      });
+    } catch (error) {
+      console.error('Approve user error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to approve user',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Reject user
+   */
+  async rejectUser(req, res) {
+    try {
+      const { userId } = req.params;
+      const { reason } = req.body;
+      const rejectedBy = req.user._id;
+
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      if (user.approvalStatus !== 'pending') {
+        return res.status(400).json({
+          success: false,
+          message: 'User is not pending approval'
+        });
+      }
+
+      user.approvalStatus = 'rejected';
+      user.approvedBy = rejectedBy;
+      user.approvedAt = new Date();
+      user.rejectionReason = reason;
+      await user.save();
+
+      res.json({
+        success: true,
+        message: 'User rejected successfully',
+        data: { user }
+      });
+    } catch (error) {
+      console.error('Reject user error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to reject user',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Bulk approve users
+   */
+  async bulkApproveUsers(req, res) {
+    try {
+      const { userIds } = req.body;
+      const approvedBy = req.user._id;
+
+      if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'User IDs array is required'
+        });
+      }
+
+      const result = await User.updateMany(
+        {
+          _id: { $in: userIds },
+          approvalStatus: 'pending'
+        },
+        {
+          $set: {
+            approvalStatus: 'approved',
+            approvedBy,
+            approvedAt: new Date()
+          }
+        }
+      );
+
+      res.json({
+        success: true,
+        message: `${result.modifiedCount} users approved successfully`,
+        data: { modifiedCount: result.modifiedCount }
+      });
+    } catch (error) {
+      console.error('Bulk approve users error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to bulk approve users',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = new UserController();

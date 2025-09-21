@@ -52,17 +52,24 @@ const userSchema = new mongoose.Schema({
     trim: true
   },
   department: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Department',
+    required: [function() { return this.role === 'student' || this.role === 'faculty'; }, 'Department is required for students and faculty']
+  },
+  academicYear: {
     type: String,
-    trim: true
+    required: [function() { return this.role === 'student'; }, 'Academic year is required for students'],
+    enum: ['1', '2', '3', '4']
   },
   semester: {
-    type: Number,
-    min: 1,
-    max: 12
+    type: String,
+    required: [function() { return this.role === 'student'; }, 'Semester is required for students'],
+    enum: ['1', '2']
   },
   batch: {
     type: String,
-    trim: true
+    trim: true,
+    required: [function() { return this.role === 'student'; }, 'Batch is required for students']
   },
   
   // Faculty-specific fields
@@ -102,6 +109,26 @@ const userSchema = new mongoose.Schema({
   },
   dateOfBirth: {
     type: Date
+  },
+  
+  // Approval status
+  approvalStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  approvedAt: {
+    type: Date,
+    default: null
+  },
+  rejectionReason: {
+    type: String,
+    trim: true
   },
   
   // System fields

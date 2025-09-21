@@ -20,6 +20,9 @@ const attendanceRoutes = require('./routes/attendanceRoutes');
 const sessionRoutes = require('./routes/sessionRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const timetableRoutes = require('./routes/timetableRoutes');
+const academicYearRoutes = require('./routes/academicYearRoutes');
+const departmentRoutes = require('./routes/departmentRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
@@ -80,6 +83,9 @@ app.use('/api/attendance', attendanceRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/timetables', timetableRoutes);
+app.use('/api/academic-years', academicYearRoutes);
+app.use('/api/departments', departmentRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

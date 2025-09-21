@@ -162,4 +162,10 @@ router.put('/:userId', authenticateToken, requireOwnershipOrHigherRole, updateUs
 router.delete('/:userId', authenticateToken, requireAdmin, userController.deleteUser);
 router.put('/:userId/toggle-status', authenticateToken, requireAdmin, toggleUserStatusValidation, userController.toggleUserStatus);
 
+// Approval routes
+router.get('/pending-approvals', authenticateToken, requireAdmin, userController.getPendingApprovals);
+router.post('/:userId/approve', authenticateToken, requireAdmin, userController.approveUser);
+router.post('/:userId/reject', authenticateToken, requireAdmin, userController.rejectUser);
+router.post('/bulk-approve', authenticateToken, requireAdmin, userController.bulkApproveUsers);
+
 module.exports = router;
