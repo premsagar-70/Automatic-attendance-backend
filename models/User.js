@@ -56,15 +56,22 @@ const userSchema = new mongoose.Schema({
     ref: 'Department',
     required: [function() { return this.role === 'student' || this.role === 'faculty'; }, 'Department is required for students and faculty']
   },
+  // Legacy department field for migration
+  departmentName: {
+    type: String,
+    trim: true
+  },
   academicYear: {
     type: String,
     required: [function() { return this.role === 'student'; }, 'Academic year is required for students'],
-    enum: ['1', '2', '3', '4']
+    enum: ['1', '2', '3', '4'],
+    default: '1' // Default for existing students
   },
   semester: {
     type: String,
     required: [function() { return this.role === 'student'; }, 'Semester is required for students'],
-    enum: ['1', '2']
+    enum: ['1', '2'],
+    default: '1' // Default for existing students
   },
   batch: {
     type: String,

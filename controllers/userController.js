@@ -275,6 +275,48 @@ class UserController {
         });
       }
 
+      // Fix validation issues before saving
+      if (user.role === 'student') {
+        // Ensure required fields for students
+        if (!user.academicYear || !['1', '2', '3', '4'].includes(user.academicYear)) {
+          user.academicYear = '1';
+        }
+        if (!user.semester || !['1', '2'].includes(user.semester)) {
+          user.semester = '1';
+        }
+        if (!user.batch) {
+          user.batch = '2024';
+        }
+      }
+
+      // Fix department field if it's a string
+      if (typeof user.department === 'string') {
+        // Try to find a department with this name/code
+        const Department = require('../models/Department');
+        let dept = await Department.findOne({ 
+          $or: [
+            { name: { $regex: new RegExp(user.department, 'i') } },
+            { code: { $regex: new RegExp(user.department, 'i') } }
+          ]
+        });
+        
+        if (!dept) {
+          // Create a default department if none found
+          dept = await Department.findOne({ code: 'DEFAULT' });
+          if (!dept) {
+            dept = await Department.create({
+              name: 'Default Department',
+              code: 'DEFAULT',
+              description: 'Default department for migrated users',
+              createdBy: req.user._id,
+              isActive: true
+            });
+          }
+        }
+        user.department = dept._id;
+        user.departmentName = user.department; // Store original name
+      }
+
       // Update status
       user.isActive = isActive;
       await user.save();

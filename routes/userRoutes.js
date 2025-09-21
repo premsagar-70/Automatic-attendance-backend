@@ -3,6 +3,7 @@ const { body, query } = require('express-validator');
 const userController = require('../controllers/userController');
 const { authenticateToken } = require('../middlewares/authMiddleware');
 const { requireAdmin, requireFacultyOrAdmin, requireOwnershipOrHigherRole } = require('../middlewares/roleMiddleware');
+const { fixUserValidation } = require('../middlewares/validationFix');
 
 const router = express.Router();
 
@@ -160,7 +161,7 @@ router.get('/dashboard', authenticateToken, userController.getUserDashboard);
 router.get('/:userId', authenticateToken, requireOwnershipOrHigherRole, userController.getUserById);
 router.put('/:userId', authenticateToken, requireOwnershipOrHigherRole, updateUserValidation, userController.updateUser);
 router.delete('/:userId', authenticateToken, requireAdmin, userController.deleteUser);
-router.put('/:userId/toggle-status', authenticateToken, requireAdmin, toggleUserStatusValidation, userController.toggleUserStatus);
+router.put('/:userId/toggle-status', authenticateToken, requireAdmin, toggleUserStatusValidation, fixUserValidation, userController.toggleUserStatus);
 
 // Approval routes
 router.get('/pending-approvals', authenticateToken, requireAdmin, userController.getPendingApprovals);
