@@ -13,7 +13,7 @@ const AcademicYear = require('../models/AcademicYear');
 const QRCodeLog = require('../models/QRCodeLog');
 
 // Load sample data
-const sampleDataPath = path.join(__dirname, '../database/sample-data.json');
+const sampleDataPath = path.join(__dirname, '../../database/sample-data.json');
 const sampleData = JSON.parse(fs.readFileSync(sampleDataPath, 'utf8'));
 
 const seedDatabase = async () => {
@@ -31,11 +31,30 @@ const seedDatabase = async () => {
 
     console.log('🗑️  Cleared existing data');
 
+    // Create a temporary admin user for department creation
+    console.log('👤 Creating temporary admin for department creation...');
+    const tempAdmin = new User({
+      firstName: 'Temp',
+      lastName: 'Admin',
+      email: 'temp-admin@sreerama.ac.in',
+      password: await bcrypt.hash('temp123', 12),
+      role: 'admin',
+      employeeId: 'TEMP-ADMIN',
+      designation: 'System',
+      isActive: true,
+      approvalStatus: 'approved'
+    });
+    await tempAdmin.save();
+    console.log('✅ Created temporary admin');
+
     // Seed departments first
     console.log('🏢 Seeding departments...');
     const departments = [];
     for (const deptData of sampleData.departments) {
-      const department = new Department(deptData);
+      const department = new Department({
+        ...deptData,
+        createdBy: tempAdmin._id
+      });
       await department.save();
       departments.push(department);
       console.log(`✅ Created department: ${department.name}`);
@@ -47,19 +66,16 @@ const seedDatabase = async () => {
       departmentMap[dept.code] = dept._id;
     });
 
-    // Seed users
+    // Seed users with proper department references
     console.log('👥 Seeding users...');
     const users = [];
     for (const userData of sampleData.users) {
-      // Hash password
-      const hashedPassword = await bcrypt.hash(userData.password, 12);
-      
       // Map department string to ObjectId
       const departmentId = departmentMap[userData.department];
       
       const user = new User({
         ...userData,
-        password: hashedPassword,
+        password: userData.password, // Let the pre-save middleware hash it
         department: departmentId
       });
       
@@ -68,20 +84,41 @@ const seedDatabase = async () => {
       console.log(`✅ Created user: ${user.firstName} ${user.lastName} (${user.role})`);
     }
 
+    // Update departments with real admin as creator
+    console.log('🔄 Updating departments with real admin...');
+    const realAdmin = users.find(user => user.role === 'admin');
+    if (realAdmin) {
+      for (const department of departments) {
+        department.createdBy = realAdmin._id;
+        await department.save();
+      }
+      console.log('✅ Updated departments with real admin');
+    }
+
+    // Remove temporary admin
+    await User.findByIdAndDelete(tempAdmin._id);
+    console.log('🗑️  Removed temporary admin');
+
     // Create user mapping for sessions
     const userMap = {};
     users.forEach(user => {
       if (user.role === 'faculty') {
         userMap[user.email] = user._id;
+        userMap[user.employeeId] = user._id; // Also map by employee ID
       } else if (user.role === 'student') {
         userMap[user.studentId] = user._id;
       }
     });
+    
+    console.log('User mapping:', userMap);
 
     // Seed academic years
     console.log('�� Seeding academic years...');
     for (const academicYearData of sampleData.academicYears) {
-      const academicYear = new AcademicYear(academicYearData);
+      const academicYear = new AcademicYear({
+        ...academicYearData,
+        createdBy: realAdmin._id
+      });
       await academicYear.save();
       console.log(`✅ Created academic year: ${academicYear.year}`);
     }
@@ -90,9 +127,13 @@ const seedDatabase = async () => {
     console.log('📚 Seeding sessions...');
     const sessions = [];
     for (const sessionData of sampleData.sessions) {
+      // Map enrolled students from IDs to ObjectIds
+      const enrolledStudents = sessionData.enrolledStudents.map(studentId => userMap[studentId]).filter(Boolean);
+      
       const session = new Session({
         ...sessionData,
-        faculty: userMap[sessionData.facultyEmail]
+        faculty: userMap[sessionData.facultyEmail],
+        enrolledStudents: enrolledStudents
       });
       await session.save();
       sessions.push(session);
@@ -112,7 +153,7 @@ const seedDatabase = async () => {
         ...attendanceData,
         student: userMap[attendanceData.studentId],
         session: sessionMap[attendanceData.sessionId],
-        approvedBy: userMap[attendanceData.approvedBy]
+        approvedBy: attendanceData.approvedBy ? userMap[attendanceData.approvedBy] : undefined
       });
       await attendance.save();
       console.log(`✅ Created attendance record for student: ${attendanceData.studentId}`);
@@ -121,7 +162,21 @@ const seedDatabase = async () => {
     // Seed timetables
     console.log('📋 Seeding timetables...');
     for (const timetableData of sampleData.timetables) {
-      const timetable = new Timetable(timetableData);
+      // Map faculty IDs in schedule to ObjectIds
+      const scheduleWithFacultyIds = timetableData.schedule.map(scheduleItem => {
+        const facultyId = userMap[scheduleItem.faculty];
+        console.log(`Mapping faculty ${scheduleItem.faculty} to ${facultyId}`);
+        return {
+          ...scheduleItem,
+          faculty: facultyId
+        };
+      });
+      
+      const timetable = new Timetable({
+        ...timetableData,
+        schedule: scheduleWithFacultyIds,
+        createdBy: realAdmin._id
+      });
       await timetable.save();
       console.log(`✅ Created timetable: ${timetable.title}`);
     }
@@ -158,7 +213,7 @@ const seedDatabase = async () => {
 // Run seeding if called directly
 if (require.main === module) {
   // Connect to MongoDB
-  mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-attendance-system', {
+  mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://premsagar10000000_db_user:0RyV170nxOlXx3wj@cluster0.dqzrkou.mongodb.net/smart-attendance', {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
