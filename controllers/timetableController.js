@@ -394,3 +394,4 @@ class TimetableController {
 }
 
 module.exports = new TimetableController();
+
