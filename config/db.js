@@ -18,11 +18,28 @@ const connectDB = async () => {
       console.log('⚠️ MongoDB disconnected');
     });
 
-    // Graceful shutdown
+    // Graceful shutdown handlers: close mongoose connection but don't force exit here.
+    // Let the main process decide how to exit so we avoid double-exit races.
     process.on('SIGINT', async () => {
-      await mongoose.connection.close();
-      console.log('🔌 MongoDB connection closed through app termination');
-      process.exit(0);
+      console.log('SIGINT received - closing MongoDB connection...');
+      try {
+        await mongoose.connection.close();
+        console.log('🔌 MongoDB connection closed through SIGINT');
+      } catch (err) {
+        console.error('Error while closing MongoDB connection on SIGINT:', err);
+      }
+      // do not call process.exit here; leave termination to the caller
+    });
+
+    process.on('SIGTERM', async () => {
+      console.log('SIGTERM received - closing MongoDB connection...');
+      try {
+        await mongoose.connection.close();
+        console.log('🔌 MongoDB connection closed through SIGTERM');
+      } catch (err) {
+        console.error('Error while closing MongoDB connection on SIGTERM:', err);
+      }
+      // do not call process.exit here; leave termination to the caller
     });
 
   } catch (error) {

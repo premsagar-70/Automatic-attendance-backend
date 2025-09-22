@@ -115,27 +115,43 @@ class TimetableController {
         ];
       }
 
-      const timetables = await Timetable.find(query)
-        .populate('createdBy', 'firstName lastName email')
-        .populate('schedule.faculty', 'firstName lastName email employeeId')
-        .sort({ createdAt: -1 })
-        .limit(limit * 1)
-        .skip((page - 1) * limit);
+        // Use aggregation with $lookup to attach department documents when department is stored as ObjectId
+        const aggPipeline = [
+          { $match: query },
+          { $sort: { createdAt: -1 } },
+          { $skip: (parseInt(page) - 1) * parseInt(limit) },
+          { $limit: parseInt(limit) },
+          // Lookup department if department is an ObjectId
+          {
+            $lookup: {
+              from: 'departments',
+              localField: 'department',
+              foreignField: '_id',
+              as: 'departmentObj'
+            }
+          },
+          // Unwind departmentObj to a single object when present
+          { $unwind: { path: '$departmentObj', preserveNullAndEmptyArrays: true } }
+        ];
 
-      // Resolve department info when department is stored as an ObjectId
-      const Department = require('../models/Department');
-      const timetablesWithDept = await Promise.all(timetables.map(async (tt) => {
-        const obj = tt.toObject();
-        try {
-          if (obj.department && /^[a-fA-F0-9]{24}$/.test(obj.department)) {
-            const dept = await Department.findById(obj.department).select('name code');
-            if (dept) obj.department = { _id: dept._id, name: dept.name, code: dept.code };
+        let timetables = await Timetable.aggregate(aggPipeline);
+
+        // Populate createdBy and schedule.faculty using Mongoose to keep code simple
+        // We'll re-query the timetables by ids to populate these refs
+        const timetableIds = timetables.map(t => t._id);
+        const populatedTimetables = await Timetable.find({ _id: { $in: timetableIds } })
+          .populate('createdBy', 'firstName lastName email')
+          .populate('schedule.faculty', 'firstName lastName email employeeId');
+
+        // Merge the aggregation departmentObj into the populated documents
+        const deptMapById = timetables.reduce((acc, t) => { acc[String(t._id)] = t.departmentObj || null; return acc; }, {});
+        const timetablesWithDept = populatedTimetables.map(pt => {
+          const obj = pt.toObject();
+          if (deptMapById[String(obj._id)]) {
+            obj.department = deptMapById[String(obj._id)];
           }
-        } catch (e) {
-          // ignore
-        }
-        return obj;
-      }));
+          return obj;
+        });
 
       const totalTimetables = await Timetable.countDocuments(query);
 

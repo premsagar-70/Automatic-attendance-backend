@@ -6,83 +6,28 @@ const qrCodeGenerator = require('../utils/qrCodeGenerator');
 const dateUtils = require('../utils/dateUtils');
 
 class SessionController {
-  /**
-   * Create a new session
-   */
+  // Create a new session
   async createSession(req, res) {
     try {
-      // Check for validation errors
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: errors.array()
-        });
+        return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
       }
 
-      const {
-        title,
-        description,
-        subject,
-        courseCode,
-        startTime,
-        endTime,
-        location,
-        roomNumber,
-        building,
-        sessionType,
-        mode,
-        onlineDetails,
-        attendanceSettings,
-        enrolledStudents,
-        maxCapacity
-      } = req.body;
+      const data = req.body;
+      data.createdBy = req.user ? req.user._id : null;
 
-      // Create session data
-      const sessionData = {
-        title,
-        description,
-        subject,
-        courseCode,
-        faculty: req.user._id,
-        startTime: new Date(startTime),
-        endTime: new Date(endTime),
-        location,
-        roomNumber,
-        building,
-        sessionType: sessionType || 'lecture',
-        mode: mode || 'offline',
-        onlineDetails: onlineDetails || {},
-        attendanceSettings: attendanceSettings || {},
-        enrolledStudents: enrolledStudents || [],
-        maxCapacity: maxCapacity || 50,
-        createdBy: req.user._id
-      };
+      const session = new Session(data);
+      const saved = await session.save();
 
-      // Create session
-      const session = await Session.create(sessionData);
-
-      res.status(201).json({
-        success: true,
-        message: 'Session created successfully',
-        data: {
-          session
-        }
-      });
+      res.status(201).json({ success: true, message: 'Session created', data: { session: saved } });
     } catch (error) {
       console.error('Create session error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to create session',
-        error: error.message
-      });
+      res.status(500).json({ success: false, message: 'Failed to create session', error: error.message });
     }
   }
 
-  /**
-   * Get sessions
-   */
+  // List sessions with filters and pagination
   async getSessions(req, res) {
     try {
       const {
@@ -96,31 +41,7 @@ class SessionController {
         limit = 10
       } = req.query;
 
-      // Build query
       const query = { isActive: true };
-
-      // If requester is admin and a department head, scope results to that department unless explicit facultyId/studentId provided
-      if (req.user && req.user.role === 'admin' && !facultyId && !studentId) {
-        try {
-          const Department = require('../models/Department');
-          const hodDept = await Department.findOne({ head: req.user._id });
-          if (hodDept) {
-            // Find faculty in that department and scope to them
-            const User = require('../models/User');
-            const facultyIds = await User.find({ role: 'faculty', department: hodDept._id }).select('_id');
-            query.faculty = { $in: facultyIds.map(f => f._id) };
-          }
-        } catch (err) {
-          console.warn('[sessionController] HOD scoping failed', err.message);
-        }
-      }
-
-      // Apply filters based on user role
-      if (req.user.role === 'faculty') {
-        query.faculty = req.user._id;
-      } else if (req.user.role === 'student') {
-        query['enrolledStudents.student'] = req.user._id;
-      }
 
       if (facultyId) query.faculty = facultyId;
       if (studentId) query['enrolledStudents.student'] = studentId;
@@ -133,487 +54,246 @@ class SessionController {
         if (endDate) query.startTime.$lte = new Date(endDate);
       }
 
-      // Calculate pagination
-      const skip = (parseInt(page) - 1) * parseInt(limit);
+      // If admin and HOD, scope to their department's faculty unless explicit filters provided
+      if (req.user && req.user.role === 'admin' && !facultyId && !studentId) {
+        const Department = require('../models/Department');
+        const hodDept = await Department.findOne({ head: req.user._id });
+        if (hodDept) {
+          const facultyDocs = await User.find({ role: 'faculty', department: hodDept._id }).select('_id');
+          const facultyIds = facultyDocs.map(f => f._id);
+          if (facultyIds.length) query.faculty = { $in: facultyIds };
+        }
+      }
 
-      // Get sessions
+      const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+
       const sessions = await Session.find(query)
-        .populate('faculty', 'firstName lastName email designation')
-        .populate('enrolledStudents.student', 'firstName lastName studentId email')
         .sort({ startTime: -1 })
         .skip(skip)
-        .limit(parseInt(limit));
+        .limit(parseInt(limit, 10))
+        .populate('faculty', 'firstName lastName email designation department')
+        .populate('enrolledStudents.student', 'firstName lastName studentId email');
 
-      // Get total count
       const totalSessions = await Session.countDocuments(query);
-
-      // Resolve department for sessions if present
-      const Department = require('../models/Department');
-      const sessionsWithDept = await Promise.all(sessions.map(async (s) => {
-        const obj = s.toObject();
-        try {
-          if (obj.department && /^[a-fA-F0-9]{24}$/.test(obj.department)) {
-            const dept = await Department.findById(obj.department).select('name code');
-            if (dept) obj.department = { _id: dept._id, name: dept.name, code: dept.code };
-          }
-        } catch (e) {
-          // ignore
-        }
-        return obj;
-      }));
 
       res.json({
         success: true,
         data: {
-          sessions: sessionsWithDept,
+          sessions,
           pagination: {
-            currentPage: parseInt(page),
-            totalPages: Math.ceil(totalSessions / parseInt(limit)),
+            currentPage: parseInt(page, 10),
+            totalPages: Math.ceil(totalSessions / parseInt(limit, 10)),
             totalSessions,
             hasNextPage: skip + sessions.length < totalSessions,
-            hasPrevPage: parseInt(page) > 1
+            hasPrevPage: parseInt(page, 10) > 1
           }
         }
       });
     } catch (error) {
       console.error('Get sessions error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to get sessions',
-        error: error.message
-      });
+      res.status(500).json({ success: false, message: 'Failed to get sessions', error: error.message });
     }
   }
 
-  /**
-   * Get session by ID
-   */
+  // Get session by ID
   async getSessionById(req, res) {
     try {
       const { sessionId } = req.params;
 
       const session = await Session.findById(sessionId)
-        .populate('faculty', 'firstName lastName email designation')
+        .populate('faculty', 'firstName lastName email designation department')
         .populate('enrolledStudents.student', 'firstName lastName studentId email');
 
-      if (!session) {
-        return res.status(404).json({
-          success: false,
-          message: 'Session not found'
-        });
+      if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
+
+      // Permissions
+      if (req.user && req.user.role === 'faculty' && session.faculty && session.faculty._id.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to view this session' });
       }
 
-      // Check permissions
-      if (req.user.role === 'faculty' && session.faculty._id.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'You do not have permission to view this session'
-        });
+      if (req.user && req.user.role === 'student') {
+        const isEnrolled = session.enrolledStudents.some(enrolled => String(enrolled.student._id || enrolled.student) === String(req.user._id));
+        if (!isEnrolled) return res.status(403).json({ success: false, message: 'You are not enrolled in this session' });
       }
 
-      if (req.user.role === 'student') {
-        const isEnrolled = session.enrolledStudents.some(
-          enrolled => enrolled.student._id.toString() === req.user._id.toString()
-        );
-        
-        if (!isEnrolled) {
-          return res.status(403).json({
-            success: false,
-            message: 'You are not enrolled in this session'
-          });
-        }
-      }
-
-      res.json({
-        success: true,
-        data: {
-          session
-        }
-      });
+      res.json({ success: true, data: { session } });
     } catch (error) {
       console.error('Get session error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to get session',
-        error: error.message
-      });
+      res.status(500).json({ success: false, message: 'Failed to get session', error: error.message });
     }
   }
 
-  /**
-   * Update session
-   */
+  // Update session
   async updateSession(req, res) {
     try {
-      // Check for validation errors
       const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: errors.array()
-        });
-      }
+      if (!errors.isEmpty()) return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
 
       const { sessionId } = req.params;
       const updateData = req.body;
 
-      // Find session
       const session = await Session.findById(sessionId);
+      if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
 
-      if (!session) {
-        return res.status(404).json({
-          success: false,
-          message: 'Session not found'
-        });
+      if (req.user && req.user.role === 'faculty' && String(session.faculty) !== String(req.user._id)) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to update this session' });
       }
 
-      // Check permissions
-      if (req.user.role === 'faculty' && session.faculty.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'You do not have permission to update this session'
-        });
-      }
-
-      // Update session
-      const updatedSession = await Session.findByIdAndUpdate(
-        sessionId,
-        updateData,
-        { new: true, runValidators: true }
-      );
-
-      res.json({
-        success: true,
-        message: 'Session updated successfully',
-        data: {
-          session: updatedSession
-        }
-      });
+      const updated = await Session.findByIdAndUpdate(sessionId, updateData, { new: true, runValidators: true });
+      res.json({ success: true, message: 'Session updated successfully', data: { session: updated } });
     } catch (error) {
       console.error('Update session error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to update session',
-        error: error.message
-      });
+      res.status(500).json({ success: false, message: 'Failed to update session', error: error.message });
     }
   }
 
-  /**
-   * Delete session
-   */
+  // Soft delete session
   async deleteSession(req, res) {
     try {
       const { sessionId } = req.params;
-
-      // Find session
       const session = await Session.findById(sessionId);
+      if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
 
-      if (!session) {
-        return res.status(404).json({
-          success: false,
-          message: 'Session not found'
-        });
+      if (req.user && req.user.role === 'faculty' && String(session.faculty) !== String(req.user._id)) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to delete this session' });
       }
 
-      // Check permissions
-      if (req.user.role === 'faculty' && session.faculty.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'You do not have permission to delete this session'
-        });
-      }
-
-      // Soft delete
       session.isActive = false;
       await session.save();
 
-      res.json({
-        success: true,
-        message: 'Session deleted successfully'
-      });
+      res.json({ success: true, message: 'Session deleted successfully' });
     } catch (error) {
       console.error('Delete session error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to delete session',
-        error: error.message
-      });
+      res.status(500).json({ success: false, message: 'Failed to delete session', error: error.message });
     }
   }
 
-  /**
-   * Start session
-   */
+  // Start session and generate QR
   async startSession(req, res) {
     try {
       const { sessionId } = req.params;
-
-      // Find session
       const session = await Session.findById(sessionId);
+      if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
 
-      if (!session) {
-        return res.status(404).json({
-          success: false,
-          message: 'Session not found'
-        });
+      if (req.user && req.user.role === 'faculty' && String(session.faculty) !== String(req.user._id)) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to start this session' });
       }
 
-      // Check permissions
-      if (req.user.role === 'faculty' && session.faculty.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'You do not have permission to start this session'
-        });
-      }
+      if (session.status !== 'scheduled') return res.status(400).json({ success: false, message: 'Session cannot be started in current status' });
 
-      // Check if session can be started
-      if (session.status !== 'scheduled') {
-        return res.status(400).json({
-          success: false,
-          message: 'Session cannot be started in current status'
-        });
-      }
-
-      // Start session
       await session.startSession();
 
-      // Generate QR code for attendance
-      const qrResult = await qrCodeGenerator.generateSessionQR(session, {
-        width: 200,
-        margin: 2
-      });
-
+      const qrResult = await qrCodeGenerator.generateSessionQR(session, { width: 200, margin: 2 });
       if (qrResult.success) {
-        // Save QR code log
         await QRCodeLog.create({
           code: qrResult.data.uniqueCode,
           session: session._id,
-          generatedBy: req.user._id,
-          settings: {
-            expiresAt: qrResult.data.expiresAt,
-            isActive: true
-          },
+          generatedBy: req.user ? req.user._id : null,
+          settings: { expiresAt: qrResult.data.expiresAt, isActive: true },
           payload: qrResult.data.payload
         });
       }
 
-      res.json({
-        success: true,
-        message: 'Session started successfully',
-        data: {
-          session,
-          qrCode: qrResult.success ? qrResult.data : null
-        }
-      });
+      res.json({ success: true, message: 'Session started successfully', data: { session, qrCode: qrResult.success ? qrResult.data : null } });
     } catch (error) {
       console.error('Start session error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to start session',
-        error: error.message
-      });
+      res.status(500).json({ success: false, message: 'Failed to start session', error: error.message });
     }
   }
 
-  /**
-   * End session
-   */
+  // End session
   async endSession(req, res) {
     try {
       const { sessionId } = req.params;
-
-      // Find session
       const session = await Session.findById(sessionId);
+      if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
 
-      if (!session) {
-        return res.status(404).json({
-          success: false,
-          message: 'Session not found'
-        });
+      if (req.user && req.user.role === 'faculty' && String(session.faculty) !== String(req.user._id)) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to end this session' });
       }
 
-      // Check permissions
-      if (req.user.role === 'faculty' && session.faculty.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'You do not have permission to end this session'
-        });
-      }
+      if (session.status !== 'active') return res.status(400).json({ success: false, message: 'Session is not active' });
 
-      // Check if session can be ended
-      if (session.status !== 'active') {
-        return res.status(400).json({
-          success: false,
-          message: 'Session is not active'
-        });
-      }
-
-      // End session
       await session.endSession();
 
-      // Deactivate QR code
       const qrCodeLog = await QRCodeLog.findOne({ 'payload.sessionId': session._id });
-      if (qrCodeLog) {
+      if (qrCodeLog && typeof qrCodeLog.deactivate === 'function') {
         await qrCodeLog.deactivate();
       }
 
-      res.json({
-        success: true,
-        message: 'Session ended successfully',
-        data: {
-          session
-        }
-      });
+      res.json({ success: true, message: 'Session ended successfully', data: { session } });
     } catch (error) {
       console.error('End session error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to end session',
-        error: error.message
-      });
+      res.status(500).json({ success: false, message: 'Failed to end session', error: error.message });
     }
   }
 
-  /**
-   * Add student to session
-   */
+  // Add student
   async addStudentToSession(req, res) {
     try {
       const { sessionId } = req.params;
       const { studentId } = req.body;
 
-      // Find session
       const session = await Session.findById(sessionId);
+      if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
 
-      if (!session) {
-        return res.status(404).json({
-          success: false,
-          message: 'Session not found'
-        });
+      if (req.user && req.user.role === 'faculty' && String(session.faculty) !== String(req.user._id)) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to modify this session' });
       }
 
-      // Check permissions
-      if (req.user.role === 'faculty' && session.faculty.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'You do not have permission to modify this session'
-        });
-      }
-
-      // Find student
       const student = await User.findById(studentId);
+      if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
 
-      if (!student) {
-        return res.status(404).json({
-          success: false,
-          message: 'Student not found'
-        });
-      }
-
-      // Add student to session
       await session.addStudent(studentId);
-
-      res.json({
-        success: true,
-        message: 'Student added to session successfully'
-      });
+      res.json({ success: true, message: 'Student added to session successfully' });
     } catch (error) {
       console.error('Add student to session error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to add student to session',
-        error: error.message
-      });
+      res.status(500).json({ success: false, message: 'Failed to add student to session', error: error.message });
     }
   }
 
-  /**
-   * Remove student from session
-   */
+  // Remove student
   async removeStudentFromSession(req, res) {
     try {
       const { sessionId } = req.params;
       const { studentId } = req.body;
 
-      // Find session
       const session = await Session.findById(sessionId);
+      if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
 
-      if (!session) {
-        return res.status(404).json({
-          success: false,
-          message: 'Session not found'
-        });
+      if (req.user && req.user.role === 'faculty' && String(session.faculty) !== String(req.user._id)) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to modify this session' });
       }
 
-      // Check permissions
-      if (req.user.role === 'faculty' && session.faculty.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'You do not have permission to modify this session'
-        });
-      }
-
-      // Remove student from session
       await session.removeStudent(studentId);
-
-      res.json({
-        success: true,
-        message: 'Student removed from session successfully'
-      });
+      res.json({ success: true, message: 'Student removed from session successfully' });
     } catch (error) {
       console.error('Remove student from session error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to remove student from session',
-        error: error.message
-      });
+      res.status(500).json({ success: false, message: 'Failed to remove student from session', error: error.message });
     }
   }
 
-  /**
-   * Get session attendance
-   */
+  // Get session attendance
   async getSessionAttendance(req, res) {
     try {
       const { sessionId } = req.params;
-
-      // Find session
       const session = await Session.findById(sessionId);
+      if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
 
-      if (!session) {
-        return res.status(404).json({
-          success: false,
-          message: 'Session not found'
-        });
+      if (req.user && req.user.role === 'faculty' && String(session.faculty) !== String(req.user._id)) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to view this session attendance' });
       }
 
-      // Check permissions
-      if (req.user.role === 'faculty' && session.faculty.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'You do not have permission to view this session attendance'
-        });
+      // If Session model exposes a helper, use it; otherwise return enrolledStudents and currentAttendance
+      let attendanceRecords = [];
+      if (typeof Session.getSessionAttendance === 'function') {
+        attendanceRecords = await Session.getSessionAttendance(sessionId);
       }
 
-      // Get attendance records
-      const attendanceRecords = await Session.getSessionAttendance(sessionId);
-
-      res.json({
-        success: true,
-        data: {
-          session,
-          attendanceRecords
-        }
-      });
+      res.json({ success: true, data: { session, attendanceRecords } });
     } catch (error) {
       console.error('Get session attendance error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to get session attendance',
-        error: error.message
-      });
+      res.status(500).json({ success: false, message: 'Failed to get session attendance', error: error.message });
     }
   }
 }

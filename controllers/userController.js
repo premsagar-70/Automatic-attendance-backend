@@ -371,21 +371,25 @@ class UserController {
         isActive: true
       });
 
-      // Get users by department (aggregate counts) and resolve department details
+      // Get users by department (aggregate counts)
       const usersByDepartmentAgg = await User.aggregate([
         { $match: { isActive: true, department: { $exists: true, $ne: null } } },
         { $group: { _id: '$department', count: { $sum: 1 } } },
         { $sort: { count: -1 } }
       ]);
 
-      // Resolve department ids to objects for client convenience
+      // Batch resolve departments to avoid N+1 queries
       const Department = require('../models/Department');
-      const usersByDepartment = await Promise.all(usersByDepartmentAgg.map(async (entry) => {
-        const dept = await Department.findById(entry._id).select('name code');
-        return {
-          department: dept ? { _id: dept._id, name: dept.name, code: dept.code } : { _id: entry._id },
-          count: entry.count
-        };
+      const deptIds = usersByDepartmentAgg.map(e => String(e._id)).filter(Boolean);
+      let deptMap = {};
+      if (deptIds.length > 0) {
+        const depts = await Department.find({ _id: { $in: deptIds } }).select('name code');
+        deptMap = depts.reduce((acc, d) => { acc[String(d._id)] = { _id: d._id, name: d.name, code: d.code }; return acc; }, {});
+      }
+
+      const usersByDepartment = usersByDepartmentAgg.map(entry => ({
+        department: deptMap[String(entry._id)] || { _id: entry._id },
+        count: entry.count
       }));
 
       res.json({
