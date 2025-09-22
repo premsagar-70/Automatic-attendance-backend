@@ -36,15 +36,7 @@ connectDB();
 app.use(helmet());
 app.use(compression());
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use('/api/', limiter);
-
-// CORS configuration
+// CORS configuration - register CORS early so preflight requests receive CORS headers
 const allowedOrigins = [
   process.env.CLIENT_URL,
   'http://localhost:3000',
@@ -63,6 +55,16 @@ app.use(cors({
   },
   credentials: true
 }));
+
+// Rate limiting - skip OPTIONS (CORS preflight) to avoid preflight responses being blocked
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+  // don't rate limit preflight requests
+  skip: (req) => req.method === 'OPTIONS'
+});
+app.use('/api/', limiter);
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
