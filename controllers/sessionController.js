@@ -99,6 +99,22 @@ class SessionController {
       // Build query
       const query = { isActive: true };
 
+      // If requester is admin and a department head, scope results to that department unless explicit facultyId/studentId provided
+      if (req.user && req.user.role === 'admin' && !facultyId && !studentId) {
+        try {
+          const Department = require('../models/Department');
+          const hodDept = await Department.findOne({ head: req.user._id });
+          if (hodDept) {
+            // Find faculty in that department and scope to them
+            const User = require('../models/User');
+            const facultyIds = await User.find({ role: 'faculty', department: hodDept._id }).select('_id');
+            query.faculty = { $in: facultyIds.map(f => f._id) };
+          }
+        } catch (err) {
+          console.warn('[sessionController] HOD scoping failed', err.message);
+        }
+      }
+
       // Apply filters based on user role
       if (req.user.role === 'faculty') {
         query.faculty = req.user._id;
@@ -131,10 +147,25 @@ class SessionController {
       // Get total count
       const totalSessions = await Session.countDocuments(query);
 
+      // Resolve department for sessions if present
+      const Department = require('../models/Department');
+      const sessionsWithDept = await Promise.all(sessions.map(async (s) => {
+        const obj = s.toObject();
+        try {
+          if (obj.department && /^[a-fA-F0-9]{24}$/.test(obj.department)) {
+            const dept = await Department.findById(obj.department).select('name code');
+            if (dept) obj.department = { _id: dept._id, name: dept.name, code: dept.code };
+          }
+        } catch (e) {
+          // ignore
+        }
+        return obj;
+      }));
+
       res.json({
         success: true,
         data: {
-          sessions,
+          sessions: sessionsWithDept,
           pagination: {
             currentPage: parseInt(page),
             totalPages: Math.ceil(totalSessions / parseInt(limit)),

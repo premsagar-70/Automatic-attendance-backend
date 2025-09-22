@@ -370,6 +370,151 @@ class AcademicYearController {
   }
 
   /**
+   * Finalize a semester and advance students to next semester/year.
+   * Body: { semesterName }
+   * Query: ?dryRun=true (optional) - preview changes without applying
+   */
+  async finalizeAndAdvanceSemester(req, res) {
+    try {
+      const { academicYearId } = req.params;
+      const { semesterName } = req.body;
+      const dryRun = req.query.dryRun === 'true';
+
+      const academicYear = await AcademicYear.findById(academicYearId);
+      if (!academicYear) {
+        return res.status(404).json({ success: false, message: 'Academic year not found' });
+      }
+
+      // Ensure semester exists in at least one academicYears entry
+      let affectedYearEntry = null;
+      for (const ay of academicYear.academicYears) {
+        const sem = ay.semesters.find(s => s.name === semesterName);
+        if (sem) {
+          affectedYearEntry = ay;
+          break;
+        }
+      }
+
+      if (!affectedYearEntry) {
+        return res.status(400).json({ success: false, message: 'Semester not found in this academic year' });
+      }
+
+      // Determine student advancement mapping: for each student in academicYear X and semester S,
+      // advance to next semester/year using these rules:
+      // - If semester is '1' -> move to '2' within same year
+      // - If semester is '2' -> move to next year 'n+1' and semester '1' (unless already year 4)
+
+      const User = require('../models/User');
+
+      // Collect students to advance
+      const studentsToAdvance = await User.find({
+        role: 'student',
+        isActive: true,
+        academicYear: affectedYearEntry.year,
+        semester: semesterName
+      }).select('_id academicYear semester fullName email');
+
+      const advances = [];
+
+      for (const student of studentsToAdvance) {
+        const currentYear = parseInt(student.academicYear, 10);
+        const currentSem = student.semester;
+
+        let newYear = student.academicYear;
+        let newSem = student.semester;
+        let action = 'none';
+
+        if (currentSem === '1') {
+          newSem = '2';
+          action = 'advance-semester';
+        } else if (currentSem === '2') {
+          if (currentYear < 4) {
+            newYear = String(currentYear + 1);
+            newSem = '1';
+            action = 'advance-year';
+          } else {
+            // Year 4, semester 2 -> graduation/complete. We'll mark as 'graduated' via a flag.
+            newYear = student.academicYear;
+            newSem = student.semester;
+            action = 'graduate';
+          }
+        }
+
+        advances.push({ studentId: student._id, name: student.fullName, from: `${student.academicYear}-${student.semester}`, to: `${newYear}-${newSem}`, action });
+      }
+
+      if (dryRun) {
+        return res.json({ success: true, message: 'Dry run', data: { total: studentsToAdvance.length, advances } });
+      }
+
+      // Apply changes in bulk
+      const bulkOps = advances.map(a => {
+        if (a.action === 'graduate') {
+          return {
+            updateOne: {
+              filter: { _id: a.studentId },
+              update: { $set: { isActive: false, graduated: true } }
+            }
+          };
+        }
+        const [ny, ns] = a.to.split('-');
+        return {
+          updateOne: {
+            filter: { _id: a.studentId },
+            update: { $set: { academicYear: ny, semester: ns } }
+          }
+        };
+      });
+
+      if (bulkOps.length > 0) {
+        const result = await User.bulkWrite(bulkOps);
+        // Finalize semester in AcademicYear model
+        await academicYear.finalizeSemester(affectedYearEntry.year, semesterName, req.user._id);
+
+        // Record audit log
+        try {
+          const AuditLog = require('../models/AuditLog');
+          await AuditLog.create({
+            action: 'finalize_and_advance_semester',
+            actor: req.user._id,
+            targetType: 'AcademicYear',
+            targetId: academicYear._id,
+            details: { total: advances.length, advancesSummary: advances.map(a => ({ studentId: a.studentId, action: a.action })) }
+          });
+        } catch (logErr) {
+          console.warn('Failed to write audit log', logErr.message);
+        }
+
+        return res.json({ success: true, message: 'Semester finalized and students advanced', data: { total: advances.length, advances, writeResult: result } });
+      }
+
+      // Nothing to change
+      await academicYear.finalizeSemester(affectedYearEntry.year, semesterName, req.user._id);
+      return res.json({ success: true, message: 'Semester finalized; no students matched the criteria', data: { total: 0 } });
+    } catch (error) {
+      console.error('Finalize and advance semester error:', error);
+      res.status(500).json({ success: false, message: 'Failed to finalize and advance semester', error: error.message });
+    }
+  }
+
+  async getAuditLogsForAcademicYear(req, res) {
+    try {
+      const { academicYearId } = req.params;
+      const AuditLog = require('../models/AuditLog');
+
+      const logs = await AuditLog.find({ targetType: 'AcademicYear', targetId: academicYearId })
+        .populate('actor', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .limit(100);
+
+      return res.json({ success: true, data: { logs } });
+    } catch (error) {
+      console.error('Get audit logs error:', error);
+      return res.status(500).json({ success: false, message: 'Failed to fetch audit logs', error: error.message });
+    }
+  }
+
+  /**
    * Get current academic year and semester
    */
   async getCurrentAcademicInfo(req, res) {

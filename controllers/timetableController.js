@@ -91,6 +91,19 @@ class TimetableController {
 
       const query = { isActive: true };
 
+      // If the requester is an admin who is a department head (HOD), scope results to their department
+      if (req.user && req.user.role === 'admin' && !department) {
+        try {
+          const Department = require('../models/Department');
+          const hodDept = await Department.findOne({ head: req.user._id });
+          if (hodDept) {
+            query.department = hodDept._id;
+          }
+        } catch (err) {
+          console.warn('[timetableController] HOD scoping failed', err.message);
+        }
+      }
+
       if (academicYear) query.academicYear = academicYear;
       if (semester) query.semester = semester;
       if (department) query.department = department;
@@ -109,12 +122,27 @@ class TimetableController {
         .limit(limit * 1)
         .skip((page - 1) * limit);
 
+      // Resolve department info when department is stored as an ObjectId
+      const Department = require('../models/Department');
+      const timetablesWithDept = await Promise.all(timetables.map(async (tt) => {
+        const obj = tt.toObject();
+        try {
+          if (obj.department && /^[a-fA-F0-9]{24}$/.test(obj.department)) {
+            const dept = await Department.findById(obj.department).select('name code');
+            if (dept) obj.department = { _id: dept._id, name: dept.name, code: dept.code };
+          }
+        } catch (e) {
+          // ignore
+        }
+        return obj;
+      }));
+
       const totalTimetables = await Timetable.countDocuments(query);
 
       res.json({
         success: true,
         data: {
-          timetables,
+          timetables: timetablesWithDept,
           pagination: {
             currentPage: parseInt(page),
             totalPages: Math.ceil(totalTimetables / limit),
@@ -153,10 +181,19 @@ class TimetableController {
         });
       }
 
-      res.json({
-        success: true,
-        data: { timetable }
-      });
+      // Resolve department info for the timetable
+      try {
+        const Department = require('../models/Department');
+        const obj = timetable.toObject();
+        if (obj.department && /^[a-fA-F0-9]{24}$/.test(obj.department)) {
+          const dept = await Department.findById(obj.department).select('name code');
+          if (dept) obj.department = { _id: dept._id, name: dept.name, code: dept.code };
+        }
+
+        return res.json({ success: true, data: { timetable: obj } });
+      } catch (e) {
+        return res.json({ success: true, data: { timetable } });
+      }
     } catch (error) {
       console.error('Get timetable error:', error);
       res.status(500).json({

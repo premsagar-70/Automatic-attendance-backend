@@ -22,6 +22,19 @@ class ReportController {
       // Build base query
       const baseQuery = { isActive: true };
 
+      // If requester is an admin who is a department head, scope reports to their department unless department is explicitly provided
+      if (req.user && req.user.role === 'admin' && !req.query.department) {
+        try {
+          const Department = require('../models/Department');
+          const hodDept = await Department.findOne({ head: req.user._id });
+          if (hodDept) {
+            baseQuery['student.department'] = hodDept._id;
+          }
+        } catch (err) {
+          console.warn('[reportController] HOD scoping failed', err.message);
+        }
+      }
+
       if (startDate || endDate) {
         baseQuery.checkInTime = {};
         if (startDate) baseQuery.checkInTime.$gte = new Date(startDate);
@@ -39,7 +52,7 @@ class ReportController {
       // Filter by subject if specified
       if (subject) {
         attendanceRecords = attendanceRecords.filter(record => 
-          record.session && record.session.subject === subject
+          record.session && String(record.session.subject) === String(subject)
         );
       }
 

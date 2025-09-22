@@ -147,4 +147,19 @@ router.post('/:academicYearId/finalize-semester',
   academicYearController.finalizeSemester
 );
 
+// Finalize a semester and advance students within that academic year
+router.post('/:academicYearId/finalize-and-advance',
+  authenticateToken,
+  requireAdmin,
+  finalizeSemesterValidation,
+  academicYearController.finalizeAndAdvanceSemester
+);
+
+// Get audit logs for an academic year
+router.get('/:academicYearId/audit-logs',
+  authenticateToken,
+  requireAdmin,
+  academicYearController.getAuditLogsForAcademicYear
+);
+
 module.exports = router;

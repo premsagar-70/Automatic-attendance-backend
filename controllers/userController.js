@@ -20,6 +20,21 @@ class UserController {
       // Build query
       const query = {};
 
+      // If the requester is an admin who is a department head (HOD), scope results to their department
+      if (req.user && req.user.role === 'admin') {
+        try {
+          const Department = require('../models/Department');
+          const hodDept = await Department.findOne({ head: req.user._id });
+          if (hodDept) {
+            // If a department filter wasn't explicitly provided, scope to HOD's department
+            if (!department) query.department = hodDept._id;
+          }
+        } catch (err) {
+          // ignore dept lookup errors and continue without scoping
+          console.warn('[userController] HOD scoping failed', err.message);
+        }
+      }
+
       // Apply filters
       if (role) query.role = role;
       if (department) query.department = department;
@@ -39,9 +54,10 @@ class UserController {
       // Calculate pagination
       const skip = (parseInt(page) - 1) * parseInt(limit);
 
-      // Get users
+      // Get users (populate department for client convenience)
       const users = await User.find(query)
         .select('-password')
+        .populate('department', 'name code')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit));
@@ -79,7 +95,7 @@ class UserController {
     try {
       const { userId } = req.params;
 
-      const user = await User.findById(userId).select('-password');
+  const user = await User.findById(userId).select('-password').populate('department', 'name code');
 
       if (!user) {
         return res.status(404).json({
@@ -355,12 +371,22 @@ class UserController {
         isActive: true
       });
 
-      // Get users by department
-      const usersByDepartment = await User.aggregate([
+      // Get users by department (aggregate counts) and resolve department details
+      const usersByDepartmentAgg = await User.aggregate([
         { $match: { isActive: true, department: { $exists: true, $ne: null } } },
         { $group: { _id: '$department', count: { $sum: 1 } } },
         { $sort: { count: -1 } }
       ]);
+
+      // Resolve department ids to objects for client convenience
+      const Department = require('../models/Department');
+      const usersByDepartment = await Promise.all(usersByDepartmentAgg.map(async (entry) => {
+        const dept = await Department.findById(entry._id).select('name code');
+        return {
+          department: dept ? { _id: dept._id, name: dept.name, code: dept.code } : { _id: entry._id },
+          count: entry.count
+        };
+      }));
 
       res.json({
         success: true,
