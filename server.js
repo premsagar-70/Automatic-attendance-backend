@@ -51,7 +51,8 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
-  'https://sih.premsagar.qzz.io'
+  'https://sih.premsagar.qzz.io',
+  'https://smart-attendance-management.netlify.app'
 ].filter(Boolean)
 
 app.use(cors({
