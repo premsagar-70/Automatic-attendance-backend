@@ -5,6 +5,15 @@ const analyticsUtils = require('../utils/analyticsUtils');
 const dateUtils = require('../utils/dateUtils');
 
 class ReportController {
+  constructor() {
+    // Bind handler methods so `this` references the controller instance when used as Express handlers
+    this.getAttendanceSummary = this.getAttendanceSummary.bind(this);
+    this.getDetailedAttendanceReport = this.getDetailedAttendanceReport.bind(this);
+    this.getAttendanceAnalytics = this.getAttendanceAnalytics.bind(this);
+    this.getAtRiskStudentsReport = this.getAtRiskStudentsReport.bind(this);
+    this.getSessionPerformanceReport = this.getSessionPerformanceReport.bind(this);
+    this.exportAttendanceData = this.exportAttendanceData.bind(this);
+  }
   /**
    * Get attendance summary report
    */

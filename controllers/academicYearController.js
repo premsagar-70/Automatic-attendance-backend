@@ -104,7 +104,7 @@ class AcademicYearController {
 
       const academicYears = await AcademicYear.find(query)
         .populate('createdBy', 'firstName lastName email')
-        .populate('semesters.finalizedBy', 'firstName lastName email')
+        .populate('academicYears.semesters.finalizedBy', 'firstName lastName email')
         .sort({ year: -1 })
         .limit(limit * 1)
         .skip((page - 1) * limit);
@@ -143,7 +143,7 @@ class AcademicYearController {
 
       const academicYear = await AcademicYear.findById(academicYearId)
         .populate('createdBy', 'firstName lastName email')
-        .populate('semesters.finalizedBy', 'firstName lastName email');
+        .populate('academicYears.semesters.finalizedBy', 'firstName lastName email');
 
       if (!academicYear) {
         return res.status(404).json({
@@ -213,7 +213,7 @@ class AcademicYearController {
         { new: true, runValidators: true }
       )
       .populate('createdBy', 'firstName lastName email')
-      .populate('semesters.finalizedBy', 'firstName lastName email');
+      .populate('academicYears.semesters.finalizedBy', 'firstName lastName email');
 
       res.json({
         success: true,
